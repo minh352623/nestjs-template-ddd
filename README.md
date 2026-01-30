@@ -1,118 +1,225 @@
 <div align="center">
 
-# 🧩 NestJS + Prisma + PostgreSQL — Clean Architecture & SOLID
+# 🧩 NestJS DDD Template — Domain-Driven Design
 
-Onboarding nhanh, chắc và sạch cho dự án Backend tuân thủ Clean Architecture & SOLID.
+Template NestJS chuẩn DDD, dễ scale và maintain cho dự án Backend.
 
 </div>
 
 ---
 
 ## 🚀 Mục tiêu
-- Tài liệu giúp member mới hiểu kiến trúc, tư duy và quy trình phát triển.
-- Hướng dẫn chạy môi trường (Docker + PostgreSQL), migrate Prisma và phát triển tính năng theo chuẩn.
+- Cung cấp cấu trúc DDD chuẩn, dễ hiểu cho team mọi quy mô
+- Tách biệt rõ ràng các layers: Domain, Application, Infrastructure, Controller
+- Dễ test, mở rộng và bảo trì lâu dài
 
 ---
 
-## 🏗️ 1. Giới thiệu Kiến trúc (Architecture Overview)
+## 🏗️ 1. Kiến trúc tổng quan (Architecture Overview)
 
-Clean Architecture chia hệ thống thành các vòng (layers) với nguyên tắc phụ thuộc từ ngoài vào trong (outer → inner):
+### Layers trong DDD
 
-- **Domain (Enterprise Rules)**: Class thuần mô tả nghiệp vụ cốt lõi (Entity, Value Object, Repository Interface). Không phụ thuộc framework/ORM.
-- **Application (Use Cases)**: Quy trình nghiệp vụ (service/use-case) dùng các cổng (interfaces) từ Domain. Không import Prisma/Nest.
-- **Infrastructure**: Hiện thực các cổng với kỹ thuật cụ thể (Prisma, DB, HTTP, Cache...). Chỉ layer này mới biết Prisma.
-- **Presentation (Interface Adapters)**: Controller/Resolver nhận request, validate DTO, gọi Use Case. Controller phải mỏng (thin), không chứa logic nghiệp vụ.
+| Layer | Trách nhiệm | Dependencies |
+|-------|-------------|--------------|
+| **Domain** | Business logic, entities, repository interfaces | Không phụ thuộc gì |
+| **Application** | Use cases, orchestration, DTOs | Chỉ phụ thuộc Domain |
+| **Infrastructure** | Database, external services | Phụ thuộc Domain |
+| **Controller** | HTTP handlers, request/response | Phụ thuộc Application |
 
-Nguyên tắc chính:
-- **Dependency Inversion**: Use Case phụ thuộc vào `Repository Interface` (abstract class), không phụ thuộc lớp Prisma cụ thể.
-- **SOLID**:
-  - S: Mỗi lớp một trách nhiệm rõ ràng (Entity: dữ liệu + invariants, Use Case: nghiệp vụ).
-  - O: Dễ mở rộng (thêm repo khác như Mongo) mà không đổi Use Case.
-  - L: Substitution hợp lệ vì hạ tầng tuân theo hợp đồng interface.
-  - I: Interface gọn (create/findByEmail) tránh phình to không cần thiết.
-  - D: Phụ thuộc vào abstraction (Repository) thay vì concretions (Prisma).
+### Flow xử lý request
 
-### 🌳 Sơ đồ cây thư mục (ví dụ module `user`)
+```
+HTTP Request
+    ↓
+[Controller] user.handler.ts    → Validate input, parse DTOs
+    ↓
+[Application] user.service.ts   → Orchestrate use case
+    ↓
+[Domain] user.domain.service.ts → Business logic
+         user.entity.ts         → Domain invariants
+    ↓
+[Infrastructure] repository.ts  → Persistence via Prisma
+    ↓
+HTTP Response
+```
+
+---
+
+## 🌳 2. Cấu trúc thư mục (Folder Structure)
 
 ```text
 src/
-├── core/                       # Shared kernel (services/tokens dùng chung)
-│   └── prisma.service.ts
+├── core/                              # Shared infrastructure
+│   └── prisma.service.ts              # Prisma client service
+│
+├── shared/                            # Shared kernel
+│   ├── domain/
+│   │   ├── base.entity.ts             # Base Entity, AggregateRoot
+│   │   ├── value-object.ts            # Base Value Object
+│   │   ├── result.ts                  # Result pattern (Either monad)
+│   │   └── exceptions/
+│   │       └── domain.exception.ts    # Domain exceptions
+│   ├── application/
+│   │   ├── use-case.ts                # UseCase interface
+│   │   └── mapper.ts                  # Mapper interface
+│   └── presentation/
+│       └── filters/                   # Global exception filters
+│
 ├── modules/
-│   └── user/
-│       ├── domain/             # Layer 1: Domain
-│       │   ├── user.entity.ts
-│       │   └── user.repository.ts          # Abstract Class (Port)
-│       ├── application/        # Layer 2: Application
-│       │   ├── create-user.dto.ts          # DTO với class-validator
-│       │   └── create-user.use-case.ts     # Business logic
-│       ├── infrastructure/     # Layer 3: Infrastructure
+│   └── user/                          # Feature module
+│       │
+│       ├── domain/                    # 🔴 DOMAIN LAYER
+│       │   ├── model/
+│       │   │   └── entity/
+│       │   │       └── user.entity.ts # User Aggregate Root
+│       │   ├── repository/
+│       │   │   └── user.repository.ts # Repository Interface (Port)
+│       │   └── service/
+│       │       ├── user.domain.service.ts      # Domain Service Interface
+│       │       └── user.domain.service.impl.ts # Domain Service Implementation
+│       │
+│       ├── application/               # 🟡 APPLICATION LAYER
+│       │   └── service/
+│       │       ├── dto/
+│       │       │   └── user.dto.ts    # Application DTOs (Input/Output)
+│       │       ├── user.service.ts    # Application Service Interface
+│       │       └── user.service.impl.ts
+│       │
+│       ├── infrastructure/            # 🟢 INFRASTRUCTURE LAYER
 │       │   └── persistence/
-│       │       ├── prisma-user.repository.ts
-│       │       └── user.mapper.ts          # Prisma Model ↔ Domain Entity
-│       └── interface-adapters/ # Layer 4: Presentation
-│           └── user.controller.ts          # HTTP endpoints
+│       │       ├── model/
+│       │       │   └── user.model.ts  # Persistence Model
+│       │       ├── mapper/
+│       │       │   └── user.mapper.ts # Entity <-> Model Mapper
+│       │       └── repository/
+│       │           └── user.repository.ts # Repository Implementation
+│       │
+│       ├── controller/                # 🔵 CONTROLLER LAYER
+│       │   ├── dto/
+│       │   │   └── user.dto.ts        # HTTP Request/Response DTOs
+│       │   └── http/
+│       │       └── user.handler.ts    # HTTP Handler
+│       │
+│       └── user.module.ts             # Module DI configuration
+│
 ├── app.module.ts
 └── main.ts
 ```
 
 ---
 
-## 🔎 2. Phân tích chi tiết từng File (Deep Dive)
+## 🔎 3. Chi tiết từng Layer
 
-- **Domain Entity (`.entity.ts`)**
-  - Là class thuần TypeScript mô tả dữ liệu và invariants (quy tắc bất biến) của nghiệp vụ.
-  - Không dùng decorator ORM (ví dụ Prisma/Nest) để giữ Domain độc lập, dễ test và tái sử dụng.
+### 🔴 Domain Layer
 
-- **Repository Interface (`.repository.ts`)**
-  - Dùng Abstract Class định nghĩa hợp đồng truy cập dữ liệu (ví dụ `create`, `findByEmail`).
-  - Giữ **Dependency Inversion**: Use Case chỉ biết interface, hạ tầng sẽ binding một implementation (Prisma, InMemory...).
+**Mục đích**: Chứa business logic thuần, không phụ thuộc framework.
 
-- **Use Case (`.use-case.ts`)**
-  - Chứa logic nghiệp vụ: kiểm tra trùng email, hash password, tạo `User`...
-  - Chỉ gọi **Repository Interface**, không import bất kỳ loại ORM/framework nào.
+| File | Mô tả |
+|------|-------|
+| `model/entity/user.entity.ts` | Aggregate Root với invariants và behaviors |
+| `repository/user.repository.ts` | Abstract class định nghĩa contract |
+| `service/user.domain.service.ts` | Domain service cho logic cross-entity |
 
-- **DTO (`.dto.ts`)**
-  - Validate dữ liệu đầu vào với `class-validator` tại rìa hệ thống (Presentation).
-  - Giữ Application/Domain sạch, tránh decorator rò rỉ vào core.
+```typescript
+// user.entity.ts - Factory Method Pattern
+export class User extends AggregateRoot<string> {
+  public static create(props: {...}): Result<User> {
+    // Validate trước khi tạo
+    if (!props.email) return Result.fail(new Error('Invalid email'));
+    return Result.ok(new User(id, props));
+  }
+  
+  public static reconstitute(props: {...}): User {
+    // Khôi phục từ DB, không validate
+    return new User(props.id, props);
+  }
+}
+```
 
-- **Infrastructure Implementation (`prisma-xxx.repository.ts`)**
-  - Nơi duy nhất dùng `PrismaService` để thao tác DB.
-  - Chuyển đổi Model từ Prisma về Domain qua **Mapper**.
+### 🟡 Application Layer
 
-- **Mapper (`.mapper.ts`)**
-  - Bảo vệ Domain khỏi chi tiết hạ tầng bằng chuyển đổi: `PrismaModel → Domain Entity` và ngược lại khi cần.
-  - Tránh để kiểu Prisma xuất hiện trong Domain/Application.
+**Mục đích**: Orchestrate use cases, gọi domain services và repositories.
 
-- **Controller (`.controller.ts`)**
-  - Mỏng (thin): nhận request, validate DTO, gọi Use Case, trả kết quả.
-  - Không viết logic nghiệp vụ trong controller để dễ thay thế transport (REST/GraphQL) mà không ảnh hưởng core.
+| File | Mô tả |
+|------|-------|
+| `service/user.service.ts` | Interface định nghĩa use cases |
+| `service/user.service.impl.ts` | Implementation orchestrate logic |
+| `service/dto/user.dto.ts` | Input/Output DTOs |
 
-- **Module (`.module.ts`)**
-  - Cấu hình **Dependency Injection**: map Interface ↔ Implementation.
-  - Ví dụ dùng Abstract Class làm token:
+```typescript
+// user.service.impl.ts
+async createUser(input: CreateUserInput): Promise<Result<UserOutput>> {
+  // 1. Validate với domain service
+  const validation = await this.domainService.validateUserCreation(input.email);
+  
+  // 2. Tạo entity
+  const userResult = User.create({...});
+  
+  // 3. Hash password
+  const hashed = await this.domainService.hashPassword(input.password);
+  
+  // 4. Persist
+  await this.userRepository.save(user);
+  
+  return Result.ok(this.toOutput(user));
+}
+```
 
-```ts
-@Module({
-  controllers: [UserController],
-  providers: [
-    PrismaService,
-    { provide: UserRepository, useClass: PrismaUserRepository },
-    CreateUserUseCase,
-  ],
-})
-export class UserModule {}
+### 🟢 Infrastructure Layer
+
+**Mục đích**: Implement các interfaces từ Domain, xử lý persistence.
+
+| File | Mô tả |
+|------|-------|
+| `persistence/model/user.model.ts` | Prisma/DB model type |
+| `persistence/mapper/user.mapper.ts` | Convert Entity <-> Model |
+| `persistence/repository/user.repository.ts` | Prisma implementation |
+
+```typescript
+// user.mapper.ts
+export class UserMapper {
+  static toDomain(model: PrismaUserModel): User {
+    return User.reconstitute({...});
+  }
+  
+  static toPersistence(entity: User): PrismaUserModel {
+    return { id: entity.id, email: entity.email, ... };
+  }
+}
+```
+
+### 🔵 Controller Layer
+
+**Mục đích**: Handle HTTP requests, validate input, gọi application service.
+
+| File | Mô tả |
+|------|-------|
+| `dto/user.dto.ts` | Request/Response DTOs với class-validator |
+| `http/user.handler.ts` | HTTP endpoints |
+
+```typescript
+// user.handler.ts
+@Post()
+async create(@Body() request: CreateUserRequest): Promise<UserResponse> {
+  const result = await this.userService.createUser({
+    email: request.email,
+    name: request.name,
+    password: request.password,
+  });
+  
+  if (result.isFailure) throw result.error;
+  return result.value;
+}
 ```
 
 ---
 
-## 🛠️ 3. Quy trình thêm một Module mới (Developer Workflow)
+## 🛠️ 4. Quy trình thêm Module mới
 
-Ví dụ tạo module `product` theo chuẩn Clean Architecture:
+### Step 1: Database Schema
 
-1) **Định nghĩa Database (Schema Prisma)**
-- Thêm vào `prisma/schema.prisma`:
 ```prisma
+// prisma/schema.prisma
 model Product {
   id        String   @id @default(uuid())
   name      String
@@ -120,117 +227,181 @@ model Product {
   createdAt DateTime @default(now())
 }
 ```
-- Chạy: `npm run prisma:generate` và `npm run prisma:migrate -- --name add_product`
 
-2) **Định nghĩa Domain (Entity & Repository Interface) — làm trước tiên!**
-- `src/modules/product/domain/product.entity.ts`: class thuần + invariants.
-- `src/modules/product/domain/product.repository.ts`: abstract class với các hàm cần thiết.
+```bash
+npm run prisma:generate
+npm run prisma:migrate
+```
 
-3) **Viết Application Layer (Use Cases & DTO)**
-- `src/modules/product/application/create-product.dto.ts`: DTO với validator.
-- `src/modules/product/application/create-product.use-case.ts`: Use Case inject `ProductRepository`, không import Prisma.
+### Step 2: Domain Layer
 
-4) **Infrastructure (Prisma)**
-- `src/modules/product/infrastructure/persistence/prisma-product.repository.ts`: extends `ProductRepository`, dùng `PrismaService`.
-- `src/modules/product/infrastructure/persistence/product.mapper.ts`: chuyển đổi Prisma Model ↔ Domain.
+```text
+src/modules/product/domain/
+├── model/entity/product.entity.ts
+├── repository/product.repository.ts
+└── service/product.domain.service.ts
+```
 
-5) **Presentation (Controller)**
-- `src/modules/product/interface-adapters/product.controller.ts`: endpoint REST gọi Use Case.
+### Step 3: Application Layer
 
-6) **Module Wiring**
-- `src/modules/product/product.module.ts`:
-```ts
+```text
+src/modules/product/application/service/
+├── dto/product.dto.ts
+├── product.service.ts
+└── product.service.impl.ts
+```
+
+### Step 4: Infrastructure Layer
+
+```text
+src/modules/product/infrastructure/persistence/
+├── model/product.model.ts
+├── mapper/product.mapper.ts
+└── repository/product.repository.ts
+```
+
+### Step 5: Controller Layer
+
+```text
+src/modules/product/controller/
+├── dto/product.dto.ts
+└── http/product.handler.ts
+```
+
+### Step 6: Module Wiring
+
+```typescript
+// product.module.ts
 @Module({
-  controllers: [ProductController],
+  controllers: [ProductHandler],
   providers: [
     PrismaService,
     { provide: ProductRepository, useClass: PrismaProductRepository },
-    CreateProductUseCase,
+    { provide: ProductDomainService, useClass: ProductDomainServiceImpl },
+    { provide: ProductService, useClass: ProductServiceImpl },
   ],
 })
 export class ProductModule {}
 ```
 
-7) **Thêm vào Root App**
-- Import `ProductModule` trong `app.module.ts`.
+### Step 7: Register Module
+
+```typescript
+// app.module.ts
+@Module({
+  imports: [UserModule, ProductModule],
+})
+export class AppModule {}
+```
 
 ---
 
-## ⚙️ 4. Chạy dự án (Environment & Commands)
+## ⚙️ 5. Chạy dự án
 
-Yêu cầu: Node.js 18+, Docker Desktop.
+### Yêu cầu
+- Node.js 18+
+- Docker Desktop
 
-- Khởi động PostgreSQL bằng Docker:
+### Commands
+
 ```bash
+# 1. Start PostgreSQL
 docker compose up -d
-```
 
-- Cấu hình env: `./.env`
-```bash
-DATABASE_URL="postgresql://postgres:postgres@localhost:5432/appdb?schema=public"
-```
+# 2. Tạo file .env
+echo 'DATABASE_URL="postgresql://postgres:postgres@localhost:5432/appdb?schema=public"' > .env
 
-- Generate Prisma Client:
-```bash
+# 3. Generate Prisma Client
 npm run prisma:generate
-```
 
-- Apply migrations:
-```bash
+# 4. Run migrations
 npm run prisma:migrate
-```
 
-- Chạy dev server:
-```bash
+# 5. Start dev server
 npm run start:dev
 ```
 
-- Test endpoint tạo user:
+### Test APIs
+
 ```bash
-curl -i -X POST http://localhost:3000/users \
-  -H 'Content-Type: application/json' \
-  -d '{"email":"alice@example.com","password":"supersecret"}'
+# Create User
+curl -X POST http://localhost:3000/users \
+  -H "Content-Type: application/json" \
+  -d '{"email":"test@example.com","name":"John Doe","password":"Password123"}'
+
+# List Users
+curl http://localhost:3000/users
+
+# Get User
+curl http://localhost:3000/users/{id}
+
+# Update User
+curl -X PATCH http://localhost:3000/users/{id} \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Jane Doe"}'
+
+# Delete User
+curl -X DELETE http://localhost:3000/users/{id}
 ```
 
----
+### Swagger Documentation
 
-## 🧪 5. Nguyên tắc Test & Chất lượng
-- Unit Test cho Use Case: mock `Repository Interface`, không cần DB thật.
-- Integration Test cho Controller/Repository: dùng Docker DB hoặc test DB riêng.
-- Lint & Format: giữ code sạch, tên biến/hàm ý nghĩa.
+Truy cập: **http://localhost:3000/api/docs**
 
 ---
 
-## 🔒 6. Bảo mật & Thực hành tốt
-- Hash mật khẩu trong Use Case (ví dụ `bcrypt`) trước khi tạo `User`.
-- Không để kiểu Prisma/ORM rò rỉ ra Domain/Application.
-- DTO chỉ nằm ở Presentation/Application, validate ở rìa hệ thống.
-- Logger, exception filter nên ở Presentation/Infrastructure, không trộn vào Domain/Application.
+## 🧪 6. Testing Strategy
+
+| Test Type | Target | Mock |
+|-----------|--------|------|
+| Unit Test | Domain Entity | Không cần |
+| Unit Test | Domain Service | Repository |
+| Unit Test | Application Service | Domain Service, Repository |
+| Integration Test | Repository | Real DB |
+| E2E Test | Controller | Real system |
 
 ---
 
-## ✅ 7. Checklist tuân thủ Clean Architecture
-- Domain/Application không import Nest/Prisma.
-- Use Case gọi qua `Repository Interface` (Abstract Class).
-- Controller mỏng, không chứa logic nghiệp vụ.
-- Mapper tách bạch hạ tầng với core.
-- DI wiring map Interface ↔ Prisma Implementation ở Module.
+## ✅ 7. Checklist tuân thủ DDD
+
+- [ ] Domain không import NestJS/Prisma
+- [ ] Entity sử dụng Factory Method (`create`, `reconstitute`)
+- [ ] Application Service chỉ gọi Domain interfaces
+- [ ] Repository trả về Domain Entity, không trả Prisma Model
+- [ ] Controller mỏng, không chứa business logic
+- [ ] Mapper tách biệt Entity và Persistence Model
+- [ ] Result Pattern thay vì throw exception trong domain
 
 ---
 
-## 📦 8. Tham chiếu file quan trọng (demo User)
-- `src/modules/user/domain/user.entity.ts`: Entity thuần + invariants.
-- `src/modules/user/domain/user.repository.ts`: Abstract class (Port).
-- `src/modules/user/application/create-user.dto.ts`: DTO với validator.
-- `src/modules/user/application/create-user.use-case.ts`: Logic nghiệp vụ, inject `UserRepository`.
-- `src/modules/user/infrastructure/persistence/prisma-user.repository.ts`: Hiện thực Repository bằng Prisma.
-- `src/modules/user/infrastructure/persistence/user.mapper.ts`: Chuyển đổi Prisma Model ↔ Domain.
-- `src/modules/user/interface-adapters/user.controller.ts`: Endpoint REST.
-- `src/modules/user/user.module.ts`: DI wiring (Abstract → Prisma).
-- `src/core/prisma.service.ts`: PrismaClient dùng chung.
+## 📦 8. File Reference (User Module)
+
+| Layer | File | Mô tả |
+|-------|------|-------|
+| Domain | `domain/model/entity/user.entity.ts` | User Aggregate Root |
+| Domain | `domain/repository/user.repository.ts` | Repository Interface |
+| Domain | `domain/service/user.domain.service.ts` | Domain Service |
+| Application | `application/service/user.service.ts` | Application Service Interface |
+| Application | `application/service/dto/user.dto.ts` | Application DTOs |
+| Infrastructure | `infrastructure/persistence/repository/user.repository.ts` | Prisma Repository |
+| Infrastructure | `infrastructure/persistence/mapper/user.mapper.ts` | Entity Mapper |
+| Controller | `controller/http/user.handler.ts` | HTTP Handler |
+| Controller | `controller/dto/user.dto.ts` | Request/Response DTOs |
 
 ---
 
 ## 🙌 Kết luận
-Dự án này đặt **Domain & Use Case** ở trung tâm, cô lập hạ tầng và giao tiếp I/O ở rìa. Tuân thủ nghiêm ngặt **Clean Architecture** và **SOLID** giúp code dễ test, mở rộng và bảo trì lâu dài.
+
+Template này áp dụng **DDD (Domain-Driven Design)** với cấu trúc rõ ràng:
+
+- **Domain** ở trung tâm, độc lập với framework
+- **Application** orchestrate use cases
+- **Infrastructure** cách ly từ domain
+- **Controller** mỏng, chỉ handle HTTP
+
+Phù hợp cho:
+- ✅ Team mọi quy mô
+- ✅ CRUD-heavy applications
+- ✅ Microservices
+- ✅ Long-term maintenance
 

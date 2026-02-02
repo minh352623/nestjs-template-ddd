@@ -400,7 +400,7 @@ Truy cập: **http://localhost:3000/api/docs**
 | Application | `application/service/payment.service.ts` | Application Service Interface |
 | Application | `application/service/dto/payment.dto.ts` | Application DTOs |
 | Infrastructure | `infrastructure/persistence/repository/payment.repository.ts` | Payment Repository |
-| **Infrastructure** | **`infrastructure/external/user-repository.port.ts`** | **Interface (Port) để lấy User data** |
+| **Domain** | **`domain/ports/external-user.port.ts`** | **Interface (Port) để lấy User data** |
 | **Infrastructure** | **`infrastructure/external/user-repository.local-adapter.ts`** | **LocalAdapter - Monolith** |
 | **Infrastructure** | **`infrastructure/external/user-repository.http-adapter.ts`** | **HTTPAdapter - Microservice** |
 | Controller | `controller/http/payment.handler.ts` | HTTP Handler |
@@ -464,10 +464,12 @@ modules/
 │   └── user.module.ts                 # Export UserRepository
 │
 └── payment/                           # Module Consumer (A)
+    ├── domain/
+    │   └── ports/                     # ✅ Port (Interface) đặt trong Domain Layer
+    │       └── external-user.port.ts
     ├── infrastructure/
-    │   └── external/                  # ✨ Adapters đặt trong module CONSUMER
+    │   └── external/                  # ✨ Adapters Implement Interface từ Domain
     │       ├── index.ts
-    │       ├── user-repository.port.ts        # Interface (Port)
     │       ├── user-repository.local-adapter.ts  # Monolith
     │       └── user-repository.http-adapter.ts   # Microservice
     └── payment.module.ts
@@ -475,76 +477,49 @@ modules/
 
 ### Cách implement
 
+👉 **[Xem chi tiết hướng dẫn tại đây](docs/patterns/interface-adapter.md)**
+
 #### 1. Định nghĩa Interface (Port) trong module Consumer
 
 ```typescript
-// payment/infrastructure/external/user-repository.port.ts
-export interface ExternalUserData {
-  id: string;
-  email: string;
-  name: string;
-}
+// payment/domain/ports/external-user.port.ts
+export interface ExternalUserData { ... }
 
-export const USER_REPOSITORY_PORT = Symbol('USER_REPOSITORY_PORT');
+export const EXTERNAL_USER_PORT = Symbol('EXTERNAL_USER_PORT');
 
-export interface IUserRepositoryPort {
+export interface IExternalUserPort {
   findById(id: string): Promise<Result<ExternalUserData>>;
-  exists(id: string): Promise<boolean>;
 }
 ```
 
-#### 2. Implement LocalAdapter (wrap Repository của Module B)
+#### 2. Implement LocalAdapter (Infrastructure Layer)
 
 ```typescript
 // payment/infrastructure/external/user-repository.local-adapter.ts
 @Injectable()
-export class UserRepositoryLocalAdapter implements IUserRepositoryPort {
+export class UserRepositoryLocalAdapter implements IExternalUserPort { // Implement interface from Domain
   constructor(
-    // ✨ Import trực tiếp UserRepository từ User module
     @Inject(UserRepository)
     private readonly userRepository: UserRepository,
   ) {}
-
-  async findById(id: string): Promise<Result<ExternalUserData>> {
-    const user = await this.userRepository.findById(id);
-    if (!user) return Result.fail(new Error('User not found'));
-    
-    // Map to ExternalUserData (Anti-Corruption Layer)
-    return Result.ok({ id: user.id, email: user.email, name: user.name });
-  }
+  // ...
 }
 ```
 
-#### 3. Module Provider export Repository
-
-```typescript
-// user.module.ts
-@Module({
-  providers: [
-    { provide: UserRepository, useClass: PrismaUserRepository },
-  ],
-  exports: [UserRepository], // ✨ Export Repository cho module khác
-})
-export class UserModule {}
-```
-
-#### 4. Module Consumer sử dụng Adapter
+#### 3. Module Consumer sử dụng Adapter
 
 ```typescript
 // payment.module.ts
+import { EXTERNAL_USER_PORT } from './domain/ports';
+import { UserRepositoryLocalAdapter } from './infrastructure/external';
+
 @Module({
-  imports: [UserModule], // Import để lấy UserRepository
+  imports: [UserModule], 
   providers: [
-    // MONOLITH: Dùng LocalAdapter
     {
-      provide: USER_REPOSITORY_PORT,
-      useClass: UserRepositoryLocalAdapter,
+      provide: EXTERNAL_USER_PORT,
+      useClass: UserRepositoryLocalAdapter, // Bind Interface -> Implementation
     },
-    // MICROSERVICE: Đổi sang HTTPAdapter
-    // {
-    //   provide: USER_REPOSITORY_PORT,
-    //   useClass: UserRepositoryHttpAdapter,
-    // },
   ],
 })
 export class PaymentModule {}

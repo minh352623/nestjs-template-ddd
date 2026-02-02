@@ -21,6 +21,9 @@ import { PrismaService } from '../../core/prisma.service';
 /**
  * User Module
  * Wires up all dependencies following DDD principles
+ * 
+ * Exports UserRepository để các module khác có thể sử dụng
+ * thông qua Interface + Adapter Pattern
  */
 @Module({
   controllers: [UserHandler],
@@ -46,6 +49,9 @@ import { PrismaService } from '../../core/prisma.service';
       useClass: UserServiceImpl,
     },
   ],
-  exports: [UserService, UserRepository],
+  exports: [
+    UserService,
+    UserRepository, // ✨ Export để module khác có thể wrap bằng LocalAdapter
+  ],
 })
 export class UserModule {}

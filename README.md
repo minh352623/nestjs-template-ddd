@@ -374,7 +374,9 @@ Truy cập: **http://localhost:3000/api/docs**
 
 ---
 
-## 📦 8. File Reference (User Module)
+## 📦 8. File Reference
+
+### User Module (Provider)
 
 | Layer | File | Mô tả |
 |-------|------|-------|
@@ -388,6 +390,265 @@ Truy cập: **http://localhost:3000/api/docs**
 | Controller | `controller/http/user.handler.ts` | HTTP Handler |
 | Controller | `controller/dto/user.dto.ts` | Request/Response DTOs |
 
+### Payment Module (Consumer - ví dụ Interface + Adapter Pattern)
+
+| Layer | File | Mô tả |
+|-------|------|-------|
+| Domain | `domain/model/entity/payment.entity.ts` | Payment Aggregate Root |
+| Domain | `domain/repository/payment.repository.ts` | Repository Interface |
+| Domain | `domain/service/payment.domain.service.ts` | Domain Service |
+| Application | `application/service/payment.service.ts` | Application Service Interface |
+| Application | `application/service/dto/payment.dto.ts` | Application DTOs |
+| Infrastructure | `infrastructure/persistence/repository/payment.repository.ts` | Payment Repository |
+| **Infrastructure** | **`infrastructure/external/user-repository.port.ts`** | **Interface (Port) để lấy User data** |
+| **Infrastructure** | **`infrastructure/external/user-repository.local-adapter.ts`** | **LocalAdapter - Monolith** |
+| **Infrastructure** | **`infrastructure/external/user-repository.http-adapter.ts`** | **HTTPAdapter - Microservice** |
+| Controller | `controller/http/payment.handler.ts` | HTTP Handler |
+| Controller | `controller/dto/payment.dto.ts` | Request/Response DTOs |
+
+---
+
+## 🔄 9. Cross-Module Communication (Interface + Adapter Pattern)
+
+### Tại sao cần Pattern này?
+
+Khi một module (A) cần dữ liệu từ module khác (B), thay vì inject trực tiếp service, ta sử dụng **Interface + Adapter Pattern** để:
+
+- ✅ **Loose Coupling**: Module A không phụ thuộc vào implementation của Module B
+- ✅ **Microservice Ready**: Dễ dàng chuyển từ Monolith sang Microservice
+- ✅ **Testable**: Dễ mock interface trong test
+- ✅ **Anti-Corruption Layer**: Kiểm soát data được expose ra ngoài
+
+### Kiến trúc
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           MONOLITH (Hiện tại)                                │
+│                                                                              │
+│  ┌─────────────┐    interface    ┌──────────────┐   import   ┌────────────┐ │
+│  │PaymentService◄───────────────►│LocalAdapter  │◄──────────►│   User     │ │
+│  │             │                 │(direct call) │            │ Repository │ │
+│  └─────────────┘                 └──────────────┘            └────────────┘ │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      │ Tách Microservices
+                                      ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         MICROSERVICES (Sau khi tách)                         │
+│                                                                              │
+│  ┌──────────────────────────┐         ┌──────────────────────────┐          │
+│  │    PAYMENT SERVICE       │         │      USER SERVICE        │          │
+│  │                          │         │                          │          │
+│  │ ┌─────────────┐          │  HTTP/  │          ┌────────────┐  │          │
+│  │ │PaymentService◄────┐    │  gRPC   │   ┌─────►│   User     │  │          │
+│  │ └─────────────┘     │    │◄───────►│   │      │ Repository │  │          │
+│  │                     │    │         │   │      └────────────┘  │          │
+│  │         interface   │    │         │   │                      │          │
+│  │              ▼      │    │         │   │                      │          │
+│  │ ┌──────────────────┐│    │         │   │                      │          │
+│  │ │ HTTPAdapter      ││    │         │   │                      │          │
+│  │ │ (API calls)      │├────┼─────────┼───┘                      │          │
+│  │ └──────────────────┘│    │         │                          │          │
+│  └─────────────────────┴────┘         └──────────────────────────┘          │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Cấu trúc thư mục
+
+```text
+modules/
+├── user/                              # Module Provider (B)
+│   ├── domain/
+│   │   └── repository/
+│   │       └── user.repository.ts     # Repository được export
+│   └── user.module.ts                 # Export UserRepository
+│
+└── payment/                           # Module Consumer (A)
+    ├── infrastructure/
+    │   └── external/                  # ✨ Adapters đặt trong module CONSUMER
+    │       ├── index.ts
+    │       ├── user-repository.port.ts        # Interface (Port)
+    │       ├── user-repository.local-adapter.ts  # Monolith
+    │       └── user-repository.http-adapter.ts   # Microservice
+    └── payment.module.ts
+```
+
+### Cách implement
+
+#### 1. Định nghĩa Interface (Port) trong module Consumer
+
+```typescript
+// payment/infrastructure/external/user-repository.port.ts
+export interface ExternalUserData {
+  id: string;
+  email: string;
+  name: string;
+}
+
+export const USER_REPOSITORY_PORT = Symbol('USER_REPOSITORY_PORT');
+
+export interface IUserRepositoryPort {
+  findById(id: string): Promise<Result<ExternalUserData>>;
+  exists(id: string): Promise<boolean>;
+}
+```
+
+#### 2. Implement LocalAdapter (wrap Repository của Module B)
+
+```typescript
+// payment/infrastructure/external/user-repository.local-adapter.ts
+@Injectable()
+export class UserRepositoryLocalAdapter implements IUserRepositoryPort {
+  constructor(
+    // ✨ Import trực tiếp UserRepository từ User module
+    @Inject(UserRepository)
+    private readonly userRepository: UserRepository,
+  ) {}
+
+  async findById(id: string): Promise<Result<ExternalUserData>> {
+    const user = await this.userRepository.findById(id);
+    if (!user) return Result.fail(new Error('User not found'));
+    
+    // Map to ExternalUserData (Anti-Corruption Layer)
+    return Result.ok({ id: user.id, email: user.email, name: user.name });
+  }
+}
+```
+
+#### 3. Module Provider export Repository
+
+```typescript
+// user.module.ts
+@Module({
+  providers: [
+    { provide: UserRepository, useClass: PrismaUserRepository },
+  ],
+  exports: [UserRepository], // ✨ Export Repository cho module khác
+})
+export class UserModule {}
+```
+
+#### 4. Module Consumer sử dụng Adapter
+
+```typescript
+// payment.module.ts
+@Module({
+  imports: [UserModule], // Import để lấy UserRepository
+  providers: [
+    // MONOLITH: Dùng LocalAdapter
+    {
+      provide: USER_REPOSITORY_PORT,
+      useClass: UserRepositoryLocalAdapter,
+    },
+    // MICROSERVICE: Đổi sang HTTPAdapter
+    // {
+    //   provide: USER_REPOSITORY_PORT,
+    //   useClass: UserRepositoryHttpAdapter,
+    // },
+  ],
+})
+export class PaymentModule {}
+```
+
+#### 5. Business Service inject Interface
+
+```typescript
+// payment.service.impl.ts
+@Injectable()
+export class PaymentServiceImpl {
+  constructor(
+    @Inject(USER_REPOSITORY_PORT)
+    private readonly userRepositoryPort: IUserRepositoryPort, // Interface only!
+  ) {}
+
+  async createPayment(input: CreatePaymentInput) {
+    // Không biết đang dùng LocalAdapter hay HTTPAdapter
+    const userResult = await this.userRepositoryPort.findById(input.userId);
+  }
+}
+```
+
+### Chuyển sang Microservice
+
+Khi tách UserModule thành microservice riêng:
+
+```typescript
+// payment.module.ts - CHỈ SỬA 1 DÒNG
+@Module({
+  // imports: [UserModule],  // Bỏ import
+  providers: [
+    {
+      provide: USER_REPOSITORY_PORT,
+      useClass: UserRepositoryHttpAdapter, // ✨ Đổi từ LocalAdapter
+    },
+  ],
+})
+export class PaymentModule {}
+```
+
+**PaymentServiceImpl KHÔNG cần thay đổi code!**
+
+
+
+---
+
+## 🚀 10. Microservice Migration Guide
+
+### Phase 1: Monolith (Hiện tại)
+
+```
+┌─────────────────────────────────────────┐
+│              Monolith App               │
+│  ┌─────────────┐    ┌─────────────────┐ │
+│  │ UserModule  │◄───│ PaymentModule   │ │
+│  │             │    │ (LocalAdapter)  │ │
+│  └─────────────┘    └─────────────────┘ │
+│         │                    │          │
+│         └─────────┬──────────┘          │
+│                   ▼                     │
+│              PostgreSQL                 │
+└─────────────────────────────────────────┘
+```
+
+### Phase 2: Modular Monolith
+
+```
+┌─────────────────────────────────────────┐
+│              Monolith App               │
+│  ┌─────────────┐    ┌─────────────────┐ │
+│  │ UserModule  │◄───│ PaymentModule   │ │
+│  │ (separate   │    │ (LocalAdapter)  │ │
+│  │  database)  │    │ (own database)  │ │
+│  └──────┬──────┘    └────────┬────────┘ │
+│         │                    │          │
+│         ▼                    ▼          │
+│    User DB              Payment DB      │
+└─────────────────────────────────────────┘
+```
+
+### Phase 3: Microservices
+
+```
+┌──────────────────┐     ┌──────────────────┐
+│  User Service    │     │ Payment Service  │
+│  ┌────────────┐  │ HTTP│ ┌──────────────┐ │
+│  │ UserModule │◄─┼─────┼─│ HttpAdapter  │ │
+│  └─────┬──────┘  │     │ └──────────────┘ │
+│        │         │     │        │         │
+│        ▼         │     │        ▼         │
+│    User DB       │     │   Payment DB     │
+└──────────────────┘     └──────────────────┘
+```
+
+### Checklist khi tách Microservice
+
+- [ ] Tạo repository mới cho service
+- [ ] Copy module vào repo mới
+- [ ] Đổi LocalAdapter → HttpAdapter ở các module consumer
+- [ ] Cấu hình service URL trong environment
+- [ ] Implement Circuit Breaker (optional nhưng khuyến nghị)
+- [ ] Setup API Gateway (nếu cần)
+
 ---
 
 ## 🙌 Kết luận
@@ -398,10 +659,12 @@ Template này áp dụng **DDD (Domain-Driven Design)** với cấu trúc rõ r�
 - **Application** orchestrate use cases
 - **Infrastructure** cách ly từ domain
 - **Controller** mỏng, chỉ handle HTTP
+- **Interface + Adapter** cho cross-module communication
 
 Phù hợp cho:
 - ✅ Team mọi quy mô
 - ✅ CRUD-heavy applications
-- ✅ Microservices
+- ✅ Microservices-ready từ đầu
 - ✅ Long-term maintenance
+- ✅ Dễ scale khi cần
 

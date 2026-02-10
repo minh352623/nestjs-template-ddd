@@ -4,10 +4,12 @@
  */
 export abstract class DomainException extends Error {
   public readonly code: string;
+  public readonly details?: Record<string, any>;
 
-  constructor(message: string, code: string) {
+  constructor(message: string, code: string, details?: Record<string, any>) {
     super(message);
     this.code = code;
+    this.details = details;
     this.name = this.constructor.name;
     Error.captureStackTrace(this, this.constructor);
   }
@@ -54,5 +56,15 @@ export interface ValidationError {
 export class ConflictException extends DomainException {
   constructor(message: string) {
     super(message, 'CONFLICT');
+  }
+}
+
+/**
+ * Generic Business Exception with custom error code (BP §3.2)
+ * Use for business logic errors that don't fit into specific exception types
+ */
+export class BusinessException extends DomainException {
+  constructor(code: string, message: string, details?: Record<string, any>) {
+    super(message, code, details);
   }
 }

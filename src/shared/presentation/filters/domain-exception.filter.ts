@@ -1,9 +1,10 @@
 import { ExceptionFilter, Catch, ArgumentsHost, HttpStatus, Logger } from '@nestjs/common';
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import {
   DomainException,
   EntityNotFoundException,
   BusinessRuleViolationException,
+  BusinessException,
   ValidationException,
   ConflictException,
 } from '../../domain/exceptions/domain.exception';
@@ -16,12 +17,23 @@ import {
 export class DomainExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(DomainExceptionFilter.name);
 
+  // Map business error codes to HTTP status (BP §3.3)
+  private readonly codeStatusMap: Record<string, HttpStatus> = {
+    USER_NOT_FOUND: HttpStatus.NOT_FOUND,
+    EMAIL_ALREADY_EXISTS: HttpStatus.CONFLICT,
+    INVALID_CREDENTIALS: HttpStatus.UNAUTHORIZED,
+    BALANCE_NOT_ENOUGH: HttpStatus.UNPROCESSABLE_ENTITY,
+    ORDER_ALREADY_PAID: HttpStatus.UNPROCESSABLE_ENTITY,
+    PAYMENT_NOT_FOUND: HttpStatus.NOT_FOUND,
+  };
+
   catch(exception: DomainException, host: ArgumentsHost): void {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
+    const request = ctx.getRequest<Request>();
 
     const status = this.mapExceptionToStatus(exception);
-    const body = this.buildResponseBody(exception);
+    const body = this.buildResponseBody(exception, request);
 
     this.logger.warn(`Domain exception: ${exception.code} - ${exception.message}`);
 
@@ -29,6 +41,12 @@ export class DomainExceptionFilter implements ExceptionFilter {
   }
 
   private mapExceptionToStatus(exception: DomainException): number {
+    // 1. Check code-based mapping first (for BusinessException)
+    if (this.codeStatusMap[exception.code]) {
+      return this.codeStatusMap[exception.code];
+    }
+
+    // 2. Fallback to class-based mapping
     if (exception instanceof EntityNotFoundException) {
       return HttpStatus.NOT_FOUND;
     }
@@ -41,13 +59,15 @@ export class DomainExceptionFilter implements ExceptionFilter {
     if (exception instanceof BusinessRuleViolationException) {
       return HttpStatus.UNPROCESSABLE_ENTITY;
     }
-    return HttpStatus.INTERNAL_SERVER_ERROR;
+    return HttpStatus.BAD_REQUEST;
   }
 
-  private buildResponseBody(exception: DomainException): object {
+  private buildResponseBody(exception: DomainException, request: Request): object {
     const base = {
       code: exception.code,
       message: exception.message,
+      details: exception.details || null,
+      path: request.url,
       timestamp: new Date().toISOString(),
     };
 

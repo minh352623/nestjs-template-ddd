@@ -2,6 +2,10 @@
  * Payment Application Layer DTOs
  */
 
+// Re-export PaymentStatus from Domain layer (source of truth - BP DDD dependency flow)
+import { PaymentStatus } from '../../../domain/model/entity/payment.entity';
+export { PaymentStatus };
+
 // Input DTOs
 export interface CreatePaymentInput {
   userId: string;
@@ -21,11 +25,4 @@ export interface PaymentOutput {
   status: PaymentStatus;
   description?: string;
   createdAt: Date;
-}
-
-export enum PaymentStatus {
-  PENDING = 'PENDING',
-  COMPLETED = 'COMPLETED',
-  FAILED = 'FAILED',
-  REFUNDED = 'REFUNDED',
 }

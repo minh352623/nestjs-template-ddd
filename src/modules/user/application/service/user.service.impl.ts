@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { UserService } from './user.service';
 import { Result } from '../../../../shared/domain/result';
 import {
@@ -22,6 +22,8 @@ import {
  */
 @Injectable()
 export class UserServiceImpl extends UserService {
+  private readonly logger = new Logger(UserServiceImpl.name);
+
   constructor(
     private readonly userRepository: UserRepository,
     private readonly userDomainService: UserDomainService,
@@ -55,6 +57,7 @@ export class UserServiceImpl extends UserService {
 
     // Persist
     await this.userRepository.save(user);
+    this.logger.log(`User created: ${user.id}`);
 
     return Result.ok(this.toOutput(user));
   }
@@ -115,6 +118,7 @@ export class UserServiceImpl extends UserService {
     }
 
     await this.userRepository.save(user);
+    this.logger.log(`User updated: ${user.id}`);
 
     return Result.ok(this.toOutput(user));
   }
@@ -127,6 +131,7 @@ export class UserServiceImpl extends UserService {
     }
 
     await this.userRepository.delete(id);
+    this.logger.log(`User deleted: ${id}`);
 
     return Result.ok(undefined);
   }

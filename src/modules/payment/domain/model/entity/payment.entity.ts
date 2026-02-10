@@ -1,6 +1,16 @@
 import { AggregateRoot } from '../../../../../shared/domain/base.entity';
 import { Result } from '../../../../../shared/domain/result';
-import { PaymentStatus } from '../../../application/service/dto/payment.dto';
+
+/**
+ * Payment Status enum (Domain layer - BP DDD dependency flow)
+ * Defined in Domain, re-exported by Application DTO for convenience
+ */
+export enum PaymentStatus {
+  PENDING = 'PENDING',
+  COMPLETED = 'COMPLETED',
+  FAILED = 'FAILED',
+  REFUNDED = 'REFUNDED',
+}
 
 export interface PaymentProps {
   userId: string;

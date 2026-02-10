@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import * as bcrypt from 'bcrypt';
 import { UserDomainService } from './user.domain.service';
 import { UserRepository } from '../repository/user.repository';
 import { Result } from '../../../../shared/domain/result';
@@ -27,14 +28,10 @@ export class UserDomainServiceImpl extends UserDomainService {
   }
 
   async hashPassword(password: string): Promise<string> {
-    // In production, use bcrypt
-    // return bcrypt.hash(password, 10);
-    return `hashed:${password}`;
+    return bcrypt.hash(password, 10);
   }
 
   async verifyPassword(plainPassword: string, hashedPassword: string): Promise<boolean> {
-    // In production, use bcrypt
-    // return bcrypt.compare(plainPassword, hashedPassword);
-    return hashedPassword === `hashed:${plainPassword}`;
+    return bcrypt.compare(plainPassword, hashedPassword);
   }
 }

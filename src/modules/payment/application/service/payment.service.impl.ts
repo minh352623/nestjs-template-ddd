@@ -1,4 +1,4 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject, Logger } from '@nestjs/common';
 import { PaymentService } from './payment.service';
 import { CreatePaymentInput, PaymentOutput, PaymentStatus } from './dto/payment.dto';
 import { Result } from '../../../../shared/domain/result';
@@ -12,6 +12,10 @@ import {
   IExternalUserPort,
   EXTERNAL_USER_PORT,
 } from '../../domain/ports';
+import {
+  EntityNotFoundException,
+  BusinessRuleViolationException,
+} from '../../../../shared/domain/exceptions/domain.exception';
 
 /**
  * Payment Application Service Implementation
@@ -24,6 +28,8 @@ import {
  */
 @Injectable()
 export class PaymentServiceImpl implements PaymentService {
+  private readonly logger = new Logger(PaymentServiceImpl.name);
+
   constructor(
     @Inject(PaymentRepository)
     private readonly paymentRepository: PaymentRepository,
@@ -43,7 +49,7 @@ export class PaymentServiceImpl implements PaymentService {
     const userResult = await this.externalUserPort.findById(input.userId);
 
     if (userResult.isFailure) {
-      return Result.fail(new Error(`User not found: ${input.userId}`));
+      return Result.fail(new EntityNotFoundException('User', input.userId));
     }
 
     const user = userResult.value;
@@ -75,6 +81,7 @@ export class PaymentServiceImpl implements PaymentService {
 
     // 4. Persist payment
     await this.paymentRepository.save(payment);
+    this.logger.log(`Payment created: ${payment.id} for user ${input.userId}`);
 
     // 5. Return output với user info
     return Result.ok({
@@ -94,7 +101,7 @@ export class PaymentServiceImpl implements PaymentService {
     const payment = await this.paymentRepository.findById(id);
 
     if (!payment) {
-      return Result.fail(new Error(`Payment not found: ${id}`));
+      return Result.fail(new EntityNotFoundException('Payment', id));
     }
 
     // Lấy user info qua adapter
@@ -119,7 +126,7 @@ export class PaymentServiceImpl implements PaymentService {
     const userExists = await this.externalUserPort.exists(userId);
 
     if (!userExists) {
-      return Result.fail(new Error(`User not found: ${userId}`));
+      return Result.fail(new EntityNotFoundException('User', userId));
     }
 
     const payments = await this.paymentRepository.findByUserId(userId);

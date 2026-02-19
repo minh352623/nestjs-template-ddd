@@ -1,0 +1,93 @@
+---
+description: Rules for Application Service implementation files
+globs: ["src/modules/*/application/service/*.service.impl.ts"]
+alwaysApply: false
+---
+
+# Application Service Rules
+
+You are writing an Application Service in the **Application Layer**.
+This layer orchestrates use cases — it coordinates domain objects and infrastructure.
+
+## Your responsibilities
+- Implement use cases (one public method per use case)
+- Call Domain Service for cross-entity business validation
+- Call Repository (abstract class) to persist/retrieve entities
+- Return Output DTOs — never Domain Entities directly
+- Log important events with `Logger`
+- Emit domain events for async side effects
+
+## ABSOLUTE PROHIBITIONS in this file
+```typescript
+// ❌ FORBIDDEN in application/service/*.impl.ts
+import { PrismaClient } from '@prisma/client';   // Prisma — belongs in infrastructure
+throw new NotFoundException('...');              // HTTP exception — use DomainException
+throw new BadRequestException('...');
+const prisma = new PrismaClient();              // Never instantiate directly
+```
+
+## Required imports pattern
+```typescript
+import { Injectable, Logger } from '@nestjs/common';   // ✅ OK — NestJS common
+import { EventEmitter2 } from '@nestjs/event-emitter'; // ✅ OK — for async events
+// ✅ Import domain things — repository interface, domain service, entity, exceptions
+import { EntityNotFoundException } from '../../../../shared/domain/exceptions/domain.exception';
+// ❌ Never import Prisma or TypeORM
+```
+
+## Required pattern
+
+```typescript
+@Injectable()
+export class [Module]ServiceImpl extends [Module]Service {
+  private readonly logger = new Logger([Module]ServiceImpl.name);
+
+  constructor(
+    private readonly [entity]Repo: [Entity]Repository,   // abstract class (Port)
+    private readonly [module]DomainSvc: [Module]DomainService,  // abstract class
+    // private readonly userPort: IExternalUserPort,  // cross-module port
+    private readonly eventEmitter: EventEmitter2,
+  ) { super(); }
+
+  async create(dto: Create[Entity]InputDto): Promise<[Entity]OutputDto> {
+    // 1. Domain validation (uniqueness, cross-entity rules)
+    await this.[module]DomainSvc.validateCreate(dto.uniqueField);
+
+    // 2. Create entity — check Result
+    const result = [Entity].create({ field: dto.field });
+    if (result.isFailure) throw result.error;
+    const entity = result.getValue();
+
+    // 3. Persist
+    const saved = await this.[entity]Repo.save(entity);
+    this.logger.log('[Entity] created successfully', { id: saved.id });
+
+    // 4. Emit event (async side effects — email, notification, analytics)
+    this.eventEmitter.emit('[entity].created', { id: saved.id });
+
+    // 5. Return DTO — never return entity directly
+    return this.toOutputDto(saved);
+  }
+
+  async findById(id: string): Promise<[Entity]OutputDto> {
+    const entity = await this.[entity]Repo.findById(id);
+    if (!entity) throw new EntityNotFoundException('[Entity]', id);
+    return this.toOutputDto(entity);
+  }
+
+  private toOutputDto(entity: [Entity]): [Entity]OutputDto {
+    return {
+      id: entity.id,
+      field: entity.field,
+      createdAt: entity.createdAt,
+    };
+  }
+}
+```
+
+## Error rules
+- `EntityNotFoundException` when `findById` returns null
+- `ConflictException` for uniqueness violations
+- `BusinessRuleViolationException` for business rule violations
+- Wrap unexpected errors: `throw new Error(\`[context]: \${err.message}\`)`
+- NEVER: `throw new NotFoundException(...)` — use DomainException hierarchy

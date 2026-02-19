@@ -1,0 +1,101 @@
+---
+description: Rules for HTTP Handler (Controller) files
+globs: ["src/modules/*/controller/http/*.handler.ts"]
+alwaysApply: false
+---
+
+# HTTP Handler (Controller) Rules
+
+You are writing an HTTP Handler in the **Controller Layer** — the outermost layer.
+This layer receives HTTP requests and delegates to Application Services.
+
+## Your responsibilities
+- Parse and validate HTTP input via DTOs + ValidationPipe
+- Call ONE application service method per endpoint
+- Return the service result (wrapped by ResponseInterceptor automatically)
+- Swagger documentation via decorators
+
+## ABSOLUTE PROHIBITIONS
+```typescript
+// ❌ FORBIDDEN in handler files
+if (amount > 1000) { applyDiscount(); }  // Business logic in handler
+await this.prisma.user.findUnique(...);  // Direct Prisma access
+throw new BusinessException(...);        // Domain exceptions in handler
+// try/catch blocks — DomainExceptionFilter handles everything
+```
+
+## Required pattern
+
+```typescript
+import { Controller, Get, Post, Body, Param, Delete, Query, ParseUUIDPipe, HttpCode, HttpStatus } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+// import { JwtAuthGuard } from '../../../../shared/guards/jwt-auth.guard';
+import { [Module]Service } from '../../application/service/[module].service';
+import { Create[Entity]Dto, [Entity]ResponseDto, List[Entity]QueryDto } from '../dto/[entity].dto';
+
+@ApiTags('[module]s')
+@Controller('[module]s')
+// @UseGuards(JwtAuthGuard)      // ← uncomment for protected routes
+// @ApiBearerAuth()
+export class [Entity]Handler {
+  constructor(private readonly [module]Service: [Module]Service) {}
+
+  @Post()
+  @ApiOperation({ summary: 'Create [entity]' })
+  @ApiResponse({ status: 201, type: [Entity]ResponseDto })
+  @ApiResponse({ status: 409, description: 'Conflict — already exists' })
+  @ApiResponse({ status: 400, description: 'Validation error' })
+  create(@Body() dto: Create[Entity]Dto) {
+    return this.[module]Service.create(dto);
+    // ↑ DomainExceptionFilter catches any thrown DomainException automatically
+    // ↑ ResponseInterceptor wraps success in { data, message }
+  }
+
+  @Get()
+  @ApiOperation({ summary: 'List [entity]s with pagination' })
+  findAll(@Query() query: List[Entity]QueryDto) {
+    return this.[module]Service.findAll(query.page ?? 1, query.limit ?? 20);
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Get [entity] by id' })
+  @ApiResponse({ status: 404, description: 'Not found' })
+  findOne(@Param('id', ParseUUIDPipe) id: string) {
+    return this.[module]Service.findById(id);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Soft delete [entity]' })
+  remove(@Param('id', ParseUUIDPipe) id: string) {
+    return this.[module]Service.delete(id);
+  }
+}
+```
+
+## Always use ParseUUIDPipe on :id params
+```typescript
+// ❌ No pipe
+@Get(':id') findOne(@Param('id') id: string) { ... }
+
+// ✅ Always validate UUID format
+@Get(':id') findOne(@Param('id', ParseUUIDPipe) id: string) { ... }
+```
+
+## Never try/catch in handler
+```typescript
+// ❌ Manual error handling (DomainExceptionFilter does this)
+async findOne(@Param('id', ParseUUIDPipe) id: string) {
+  try {
+    return await this.service.findById(id);
+  } catch (e) {
+    if (e instanceof EntityNotFoundException) throw new NotFoundException(e.message);
+    throw e;
+  }
+}
+
+// ✅ Clean handler — filter handles mapping
+findOne(@Param('id', ParseUUIDPipe) id: string) {
+  return this.service.findById(id);
+}
+```

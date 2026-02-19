@@ -1,0 +1,104 @@
+---
+description: Rules for DTO files (Controller DTOs and Application DTOs)
+globs: ["src/modules/*/controller/dto/*.dto.ts", "src/modules/*/application/service/dto/*.dto.ts"]
+alwaysApply: false
+---
+
+# DTO Rules
+
+DTOs are plain data containers. Two types exist in this project:
+
+## Controller DTOs (src/modules/*/controller/dto/)
+Used for HTTP request validation and Swagger documentation.
+
+```typescript
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsString, IsEmail, IsNotEmpty, IsOptional, IsNumber, Min, Max, IsUUID } from 'class-validator';
+import { Type } from 'class-transformer';
+
+// Request DTO
+export class Create[Entity]Dto {
+  @ApiProperty({ example: 'John Doe', description: 'Full name' })
+  @IsString()
+  @IsNotEmpty()
+  name: string;
+
+  @ApiProperty({ example: 'john@example.com' })
+  @IsEmail()
+  email: string;
+
+  @ApiPropertyOptional({ example: 'Optional note' })
+  @IsOptional()
+  @IsString()
+  note?: string;
+}
+
+// Pagination query DTO
+export class List[Entity]QueryDto {
+  @ApiPropertyOptional({ default: 1, minimum: 1 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  page?: number;
+
+  @ApiPropertyOptional({ default: 20, minimum: 1, maximum: 100 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  @Max(100)
+  limit?: number;
+}
+
+// Response DTO — explicit fields only, NO entity fields that should be hidden
+export class [Entity]ResponseDto {
+  @ApiProperty()
+  id: string;
+
+  @ApiProperty()
+  name: string;
+
+  @ApiProperty()
+  email: string;
+
+  @ApiProperty()
+  createdAt: Date;
+}
+```
+
+## Application DTOs (src/modules/*/application/service/dto/)
+Used between Application Service and Controller layer.
+
+```typescript
+// Input DTO — mirrors Controller DTO but without @ApiProperty
+export interface Create[Entity]InputDto {
+  name: string;
+  email: string;
+  note?: string;
+}
+
+// Output DTO — what service returns
+export interface [Entity]OutputDto {
+  id: string;
+  name: string;
+  email: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// Paginated output
+export interface PaginatedOutputDto<T> {
+  data: T[];
+  total: number;
+  page: number;
+  limit: number;
+}
+```
+
+## Rules
+- Controller DTOs: `@ApiProperty` + `class-validator` decorators REQUIRED
+- Response DTOs: no `password`, no `hashedPassword`, no internal IDs unless needed
+- Application DTOs: simple interfaces, no decorators
+- Never put `@Column()` or Prisma-related annotations in DTOs
+- Never embed Domain Entities in DTOs — map to plain objects

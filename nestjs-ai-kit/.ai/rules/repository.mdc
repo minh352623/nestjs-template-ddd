@@ -1,0 +1,107 @@
+---
+description: Rules for Infrastructure Repository implementation files (Prisma)
+globs: ["src/modules/*/infrastructure/persistence/repository/*.repository.ts"]
+alwaysApply: false
+---
+
+# Infrastructure Repository Rules
+
+You are writing a Prisma Repository in the **Infrastructure Layer**.
+This file implements the abstract Repository class defined in the Domain layer.
+
+## Your responsibilities
+- Implement the domain's abstract Repository methods
+- Use Prisma to query the database
+- Use Mapper to convert Prisma models ↔ Domain Entities
+- Handle database-specific errors (Prisma codes)
+
+## ABSOLUTE PROHIBITIONS
+```typescript
+// ❌ FORBIDDEN in infrastructure repository
+return this.prisma.user.findUnique({ where: { id } }); // return Prisma model directly
+throw new Error('User not found');              // use DomainException
+throw new EntityNotFoundException(...);         // do NOT throw domain errors here — return null
+```
+
+## Required pattern
+
+```typescript
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '../../../../../core/prisma.service';
+import { [Entity]Repository } from '../../../domain/repository/[entity].repository';
+import { [Entity] } from '../../../domain/model/entity/[entity].entity';
+import { [Entity]Mapper } from '../mapper/[entity].mapper';
+
+@Injectable()
+export class Prisma[Entity]Repository extends [Entity]Repository {
+  constructor(private readonly prisma: PrismaService) { super(); }
+
+  async findById(id: string): Promise<[Entity] | null> {
+    const model = await this.prisma.[entity].findUnique({
+      where: { id, deletedAt: null },  // ← ALWAYS filter soft-deleted
+    });
+    // ✅ Return null if not found — Application Service throws EntityNotFoundException
+    // ✅ ALWAYS map to Domain Entity via Mapper — never return Prisma model
+    return model ? [Entity]Mapper.toDomain(model) : null;
+  }
+
+  async findAll(page: number, limit: number): Promise<{ data: [Entity][]; total: number }> {
+    const [models, total] = await Promise.all([
+      this.prisma.[entity].findMany({
+        where: { deletedAt: null },
+        skip: (page - 1) * limit,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.[entity].count({ where: { deletedAt: null } }),
+    ]);
+    return {
+      data: models.map([Entity]Mapper.toDomain),
+      total,
+    };
+  }
+
+  async save(entity: [Entity]): Promise<[Entity]> {
+    const data = [Entity]Mapper.toPersistence(entity);
+    const model = await this.prisma.[entity].upsert({
+      where: { id: data.id },
+      create: data,
+      update: { ...data, updatedAt: new Date() },
+    });
+    return [Entity]Mapper.toDomain(model);
+  }
+
+  async softDelete(id: string): Promise<void> {
+    await this.prisma.[entity].update({
+      where: { id },
+      data: { deletedAt: new Date() },
+    });
+  }
+}
+```
+
+## Soft delete filter — ALWAYS include
+```typescript
+// ❌ Missing — returns deleted records
+where: { id }
+
+// ✅ Always filter
+where: { id, deletedAt: null }
+```
+
+## Prisma error handling
+```typescript
+// Catch specific Prisma errors when you can map to domain exception
+import { Prisma } from '@prisma/client';
+
+try {
+  await this.prisma.[entity].create({ data });
+} catch (err) {
+  if (err instanceof Prisma.PrismaClientKnownRequestError) {
+    if (err.code === 'P2002') {
+      throw new ConflictException('[Entity] with this value already exists');
+    }
+  }
+  throw err; // Let AllExceptionsFilter handle unknown errors
+}
+```

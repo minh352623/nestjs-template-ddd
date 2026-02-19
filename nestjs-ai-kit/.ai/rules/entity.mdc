@@ -1,0 +1,93 @@
+---
+description: Rules for Domain Entity files (AggregateRoot)
+globs: ["src/modules/*/domain/model/entity/*.entity.ts"]
+alwaysApply: false
+---
+
+# Domain Entity Rules
+
+You are writing a Domain Entity in the **Domain Layer** of a NestJS DDD project.
+This is the core of the system — all business rules live here.
+
+## Your responsibilities
+- Represent a domain concept with identity and lifecycle
+- Enforce invariants via `create()` factory method
+- Provide `reconstitute()` for loading from persistence
+- Contain domain behaviors (methods that change state)
+- Emit domain events when significant state changes occur
+
+## ABSOLUTE PROHIBITIONS in this file
+```typescript
+// ❌ FORBIDDEN — any of these in domain/model/entity/
+import { Injectable, Logger } from '@nestjs/common';  // NestJS
+import { PrismaClient, Prisma } from '@prisma/client'; // Prisma
+import { Column, Entity as ORM } from 'typeorm';       // TypeORM
+import { IsEmail } from 'class-validator';             // Validation decorators (belong in DTO)
+```
+
+## Required pattern
+
+```typescript
+import { AggregateRoot } from '../../../../shared/domain/base.entity';
+import { Result } from '../../../../shared/domain/result';
+import { ValidationException } from '../../../../shared/domain/exceptions/domain.exception';
+
+interface [Entity]Props {
+  id: string;
+  // all fields
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+interface [Entity]CreateProps {
+  // fields for creation (no id, no timestamps)
+}
+
+export class [Entity] extends AggregateRoot<string> {
+  private readonly _field: type;  // private readonly fields
+
+  private constructor(props: [Entity]Props) {  // PRIVATE constructor
+    super(props.id);
+    this._field = props.field;
+  }
+
+  // Getters only — no setters (immutable after creation)
+  get field(): type { return this._field; }
+
+  // Factory Method 1: new entity — validates invariants
+  static create(props: [Entity]CreateProps): Result<[Entity]> {
+    // validate here
+    if (!props.field) {
+      return Result.fail(new ValidationException([{ field: 'field', message: '...' }]));
+    }
+    return Result.ok(new [Entity]({ id: crypto.randomUUID(), ...props, createdAt: new Date(), updatedAt: new Date() }));
+  }
+
+  // Factory Method 2: load from DB — NO validation (trust DB data)
+  static reconstitute(props: [Entity]Props): [Entity] {
+    return new [Entity](props);
+  }
+
+  // Domain behavior (if entity has state changes)
+  complete(): Result<void> {
+    if (this._status !== 'PENDING') {
+      return Result.fail(new BusinessRuleViolationException('Can only complete PENDING entities'));
+    }
+    // mutate internal state via new instance or mutation
+    return Result.ok(undefined);
+  }
+}
+```
+
+## Rules for create()
+- Must validate ALL invariants before creating entity
+- Return `Result.fail(exception)` for any violation — never throw directly
+- Use `ValidationException` for input format errors
+- Use `BusinessRuleViolationException` for business rule violations
+- `id` is always `crypto.randomUUID()` — never passed in from outside
+- `createdAt` and `updatedAt` always set to `new Date()`
+
+## Rules for reconstitute()
+- NO validation — trust that DB data is valid (was validated at creation)
+- Just maps props to entity — no business logic
+- Called ONLY from Mapper.toDomain()
